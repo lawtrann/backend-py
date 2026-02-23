@@ -1,0 +1,48 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Backend written in Python"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.4",
+    "minio>=7.2.0",
+    "email-validator>=2.3.0",
+    "fastapi[standard]>=0.129.0",
+    "psycopg2-binary>=2.9.11",
+    "pwdlib[argon2]>=0.3.0",
+    "pydantic-settings>=2.12.0",
+    "pyjwt>=2.11.0",
+    "python-multipart>=0.0.22",
+    "sqlmodel>=0.0.33",
+    "structlog>=25.1.0",
+    "tenacity>=9.0.0",
+    "uuid-utils>=0.10.0",
+    "uvicorn[standard]>=0.40.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.1",
+    "sqlacodegen>=3.0.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    "migrations/versions/",
+    "app/infra/db/models.py"
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501", "UP046"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
