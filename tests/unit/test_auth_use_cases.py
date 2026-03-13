@@ -13,18 +13,21 @@ from app.domain.exceptions import (
     InvalidCredentialsError,
     InvalidRefreshTokenError,
 )
+from app.domain.repositories.refresh_token_repo import RefreshTokenRepository
+from app.domain.repositories.user_repo import UserRepository
 
 
 class TestRegisterUseCase:
-    def test_success(self, register_use_case, user_repo, password_service):
+    def test_success(self, register_use_case, uow, password_service):
         # Arrange
-        user_repo.get_by_username.return_value = None
-        user_repo.get_by_email.return_value = None
+        users = uow.repo(UserRepository)
+        users.get_by_username.return_value = None
+        users.get_by_email.return_value = None
         password_service.hash.return_value = "hashed_password123"
         expected_user = UserEntity(
             username="alice", email="alice@example.com", hashed_password="hashed_password123"
         )
-        user_repo.create.return_value = expected_user
+        users.create.return_value = expected_user
 
         # Act
         user = register_use_case.execute("alice", "alice@example.com", "password123")
@@ -35,22 +38,24 @@ class TestRegisterUseCase:
         assert user.hashed_password == "hashed_password123"
         assert isinstance(user.id, UUID)
         password_service.hash.assert_called_once_with("password123")
-        user_repo.create.assert_called_once()
+        users.create.assert_called_once()
+        assert uow.committed
 
-    def test_duplicate_username(self, register_use_case, user_repo):
+    def test_duplicate_username(self, register_use_case, uow):
         # Arrange
         existing = UserEntity(username="alice", email="alice@example.com", hashed_password="x")
-        user_repo.get_by_username.return_value = existing
+        uow.repo(UserRepository).get_by_username.return_value = existing
 
         # Act & Assert
         with pytest.raises(DuplicateUsernameError, match="Username already taken"):
             register_use_case.execute("alice", "other@example.com", "pw")
 
-    def test_duplicate_email(self, register_use_case, user_repo):
+    def test_duplicate_email(self, register_use_case, uow):
         # Arrange
-        user_repo.get_by_username.return_value = None
+        users = uow.repo(UserRepository)
+        users.get_by_username.return_value = None
         existing = UserEntity(username="bob", email="alice@example.com", hashed_password="x")
-        user_repo.get_by_email.return_value = existing
+        users.get_by_email.return_value = existing
 
         # Act & Assert
         with pytest.raises(DuplicateEmailError, match="Email already registered"):
@@ -58,17 +63,20 @@ class TestRegisterUseCase:
 
 
 class TestLoginUseCase:
-    def test_success(self, login_use_case, user_repo, password_service, token_service):
+    def test_success(self, login_use_case, uow, password_service, token_service):
         # Arrange
         user = UserEntity(
             username="alice", email="alice@example.com", hashed_password="hashed_secret"
         )
-        user_repo.get_by_username.return_value = user
+        uow.repo(UserRepository).get_by_username.return_value = user
         password_service.verify.return_value = True
-        token_service.create_access_token.return_value = f"access_{user.id}"
-        token_service.generate_refresh_token.return_value = "new_raw_refresh"
-        token_service.hash_refresh_token.return_value = "hashed_refresh"
-        token_service.get_refresh_token_expiry.return_value = datetime.now(UTC) + timedelta(days=7)
+        expires = datetime.now(UTC) + timedelta(days=7)
+        token_entity = RefreshTokenEntity(
+            token_hash="hashed_refresh", user_id=user.id, expires_at=expires
+        )
+        token_service.create_token_pair.return_value = (
+            f"access_{user.id}", "new_raw_refresh", token_entity,
+        )
 
         # Act
         result = login_use_case.execute("alice", "secret")
@@ -76,13 +84,15 @@ class TestLoginUseCase:
         # Assert
         assert result.access_token == f"access_{user.id}"
         assert result.refresh_token == "new_raw_refresh"
+        token_service.create_token_pair.assert_called_once_with(user.id)
+        assert uow.committed
 
-    def test_wrong_password(self, login_use_case, user_repo, password_service):
+    def test_wrong_password(self, login_use_case, uow, password_service):
         # Arrange
         user = UserEntity(
             username="alice", email="alice@example.com", hashed_password="hashed_secret"
         )
-        user_repo.get_by_username.return_value = user
+        uow.repo(UserRepository).get_by_username.return_value = user
         password_service.verify.return_value = False
 
         # Act & Assert
@@ -91,18 +101,21 @@ class TestLoginUseCase:
 
 
 class TestRefreshUseCase:
-    def test_success(self, refresh_use_case, refresh_token_repo, token_service):
+    def test_success(self, refresh_use_case, uow, token_service):
         # Arrange
         user_id = UUID(bytes=_uuid7().bytes)
         expires = datetime.now(UTC) + timedelta(days=7)
         token_entity = RefreshTokenEntity(
             token_hash="hashed_old_raw", user_id=user_id, expires_at=expires
         )
-        token_service.hash_refresh_token.side_effect = lambda t: f"hashed_{t}"
-        refresh_token_repo.get_by_hash.return_value = token_entity
-        token_service.generate_refresh_token.return_value = "new_raw_refresh"
-        token_service.create_access_token.return_value = f"access_{user_id}"
-        token_service.get_refresh_token_expiry.return_value = expires
+        token_service.hash_refresh_token.return_value = "hashed_old_raw"
+        uow.repo(RefreshTokenRepository).get_by_hash.return_value = token_entity
+        new_entity = RefreshTokenEntity(
+            token_hash="hashed_new_raw_refresh", user_id=user_id, expires_at=expires
+        )
+        token_service.create_token_pair.return_value = (
+            f"access_{user_id}", "new_raw_refresh", new_entity,
+        )
 
         # Act
         result = refresh_use_case.execute("old_raw")
@@ -110,12 +123,13 @@ class TestRefreshUseCase:
         # Assert
         assert result.access_token == f"access_{user_id}"
         assert result.refresh_token == "new_raw_refresh"
-        refresh_token_repo.revoke_by_hash.assert_called_once_with("hashed_old_raw")
+        uow.repo(RefreshTokenRepository).revoke_by_hash.assert_called_once_with("hashed_old_raw")
+        assert uow.committed
 
-    def test_invalid_token(self, refresh_use_case, refresh_token_repo, token_service):
+    def test_invalid_token(self, refresh_use_case, uow, token_service):
         # Arrange
         token_service.hash_refresh_token.return_value = "hashed_bad_token"
-        refresh_token_repo.get_by_hash.return_value = None
+        uow.repo(RefreshTokenRepository).get_by_hash.return_value = None
 
         # Act & Assert
         with pytest.raises(InvalidRefreshTokenError, match="Invalid or expired"):
@@ -123,7 +137,7 @@ class TestRefreshUseCase:
 
 
 class TestLogoutUseCase:
-    def test_revokes_token(self, logout_use_case, refresh_token_repo, token_service):
+    def test_revokes_token(self, logout_use_case, uow, token_service):
         # Arrange
         token_service.hash_refresh_token.return_value = "hashed_raw_tok"
 
@@ -131,7 +145,8 @@ class TestLogoutUseCase:
         logout_use_case.execute("raw_tok")
 
         # Assert
-        refresh_token_repo.revoke_by_hash.assert_called_once_with("hashed_raw_tok")
+        uow.repo(RefreshTokenRepository).revoke_by_hash.assert_called_once_with("hashed_raw_tok")
+        assert uow.committed
 
 
 class TestGetCurrentUserUseCase:

@@ -1,13 +1,12 @@
 import logging
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential, wait_fixed
 
 from app.core.config import settings
-from app.core.context import reset_session, set_session
 
 logger = logging.getLogger(__name__)
 
@@ -49,21 +48,20 @@ def connect_to_db() -> None:
         retry_state.attempt_number,
     ),
 )
-def _acquire_session() -> Session:
+def _acquire_session(target_engine: Engine | None = None) -> Session:
     """Checkout a DB connection from the pool with retry on transient errors."""
-    session = Session(engine)
+    e = target_engine or engine
+    session = Session(e)
     session.connection()  # eagerly acquires connection — raises OperationalError if unavailable
     return session
 
 
 def get_db() -> Generator[Session, None, None]:
     session = _acquire_session()
-    token = set_session(session)
     try:
         yield session
     except Exception:
         session.rollback()
         raise
     finally:
-        reset_session(token)
         session.close()

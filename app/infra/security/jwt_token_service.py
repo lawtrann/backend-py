@@ -6,6 +6,7 @@ from uuid import UUID
 import jwt
 
 from app.core.config import settings
+from app.domain.entities.refresh_token import RefreshTokenEntity
 from app.domain.exceptions import InvalidAccessTokenError
 from app.domain.services.token_service import TokenService
 
@@ -36,3 +37,13 @@ class JwtTokenService(TokenService):
         return datetime.now(UTC) + timedelta(
             days=settings.REFRESH_TOKEN_EXPIRE_DAYS
         )
+
+    def create_token_pair(self, user_id: UUID) -> tuple[str, str, RefreshTokenEntity]:
+        access_token = self.create_access_token(user_id)
+        raw_refresh = self.generate_refresh_token()
+        entity = RefreshTokenEntity(
+            token_hash=self.hash_refresh_token(raw_refresh),
+            user_id=user_id,
+            expires_at=self.get_refresh_token_expiry(),
+        )
+        return access_token, raw_refresh, entity

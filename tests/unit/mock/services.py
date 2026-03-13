@@ -3,15 +3,8 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from app.domain.services.auth_service import AuthService
 from app.domain.services.password_service import PasswordService
 from app.domain.services.token_service import TokenService
-
-
-@pytest.fixture
-def auth_service():
-    """Real AuthService (concrete, no mocking needed)."""
-    return AuthService()
 
 
 @pytest.fixture

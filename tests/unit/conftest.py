@@ -5,12 +5,11 @@ from tests.unit.mock.repositories import (
     user_repo,
 )
 from tests.unit.mock.services import (
-    auth_service,
     password_service,
     token_service,
 )
+from tests.unit.mock.uow import uow
 from tests.unit.mock.use_cases import (
-    _mock_session,
     get_current_user_use_case,
     login_use_case,
     logout_use_case,
@@ -23,11 +22,11 @@ __all__ = [
     "user_repo",
     "refresh_token_repo",
     # Services (domain layer)
-    "auth_service",
     "password_service",
     "token_service",
+    # Unit of Work
+    "uow",
     # Use cases (application layer)
-    "_mock_session",
     "register_use_case",
     "login_use_case",
     "refresh_use_case",
